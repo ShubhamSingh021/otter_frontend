@@ -2,8 +2,7 @@ import axios from "axios";
 import { API_URL } from "./api";
 
 const apiClient = axios.create({
-  baseURL: API_URL,
-  timeout: 30000,
+  baseURL: import.meta.env.VITE_API_URL,
   withCredentials: true,
 });
 
