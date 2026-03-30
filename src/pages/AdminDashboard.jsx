@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, Calendar, CheckCircle, XCircle, Search, Filter, 
   MoreVertical, Download, Eye, Loader2, Trash2, Image, 
-  Settings, Plus, EyeOff, Save, Type, Layout, UploadCloud
+  Settings, Plus, EyeOff, Save, Type, Layout, UploadCloud,
+  Pencil
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -14,10 +15,16 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('registrations');
   const [registrations, setRegistrations] = useState([]);
   const [gallery, setGallery] = useState([]);
+  const [events, setEvents] = useState([]);
   const [siteContent, setSiteContent] = useState({});
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   
+  // Modal State
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [eventFormData, setEventFormData] = useState({ title: '', date: '', price: '', description: '' });
+
   // Stats
   const [stats, setStats] = useState({ totalMembers: 0, activeEvents: 0, pendingTasks: 0 });
 
@@ -109,11 +116,25 @@ const AdminDashboard = () => {
     }
   };
 
+  const fetchEvents = async () => {
+    setLoading(true);
+    try {
+      const res = await fetchWithRetry(() => apiClient.get('/api/v1/events'));
+      setEvents(res?.data?.data?.events || []);
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.message || "Failed to fetch events");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchStats();
       if (activeTab === 'registrations') fetchRegistrations();
       if (activeTab === 'gallery') fetchGallery();
+      if (activeTab === 'events') fetchEvents();
       if (activeTab === 'settings') fetchSiteContent();
     }, 3000);
 
@@ -267,6 +288,59 @@ const AdminDashboard = () => {
     }
   };
 
+  // --- EVENT ACTIONS ---
+  const handleOpenEventModal = (event = null) => {
+    if (event) {
+      setEditingEvent(event);
+      setEventFormData({
+        title: event.title,
+        date: event.date ? new Date(event.date).toISOString().split('T')[0] : '',
+        price: event.price,
+        description: event.description
+      });
+    } else {
+      setEditingEvent(null);
+      setEventFormData({ title: '', date: '', price: '', description: '' });
+    }
+    setIsEventModalOpen(true);
+  };
+
+  const handleEventSubmit = async (e) => {
+    e.preventDefault();
+    setActionLoading(true);
+    try {
+      if (editingEvent) {
+        await apiClient.patch(`/api/v1/events/${editingEvent._id}`, eventFormData);
+        toast.success('Event updated successfully');
+      } else {
+        await apiClient.post('/api/v1/events', eventFormData);
+        toast.success('Event created successfully');
+      }
+      setIsEventModalOpen(false);
+      fetchEvents();
+      fetchStats();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Action failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteEvent = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this event?')) return;
+    setActionLoading(true);
+    try {
+      await apiClient.delete(`/api/v1/events/${id}`);
+      toast.success('Event deleted');
+      fetchEvents();
+      fetchStats();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Deletion failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <div className="pt-32 pb-24 px-6 md:px-12 min-h-screen bg-dark">
       <div className="max-w-[1600px] mx-auto">
@@ -282,6 +356,7 @@ const AdminDashboard = () => {
           <div className="flex bg-white/5 p-2 rounded-3xl border border-white/5">
             {[
               { id: 'registrations', icon: <Users size={16}/>, label: 'REGISTRATIONS' },
+              { id: 'events', icon: <Calendar size={16}/>, label: 'EVENTS' },
               { id: 'gallery', icon: <Image size={16}/>, label: 'GALLERY' },
               { id: 'settings', icon: <Settings size={16}/>, label: 'SITE SETTINGS' },
             ].map(tab => (
@@ -416,6 +491,82 @@ const AdminDashboard = () => {
           </div>
         )}
 
+        {/* TAB CONTENT: EVENTS MANAGER */}
+        {activeTab === 'events' && (
+          <div className="space-y-10 animate-fade-in">
+            <div className="flex flex-col md:flex-row justify-between gap-8 items-center">
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tight">Manage Events.</h2>
+                <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">Add, update or remove sports events</p>
+              </div>
+              <button 
+                onClick={() => handleOpenEventModal()}
+                className="flex items-center gap-3 px-8 py-4 bg-primary text-dark rounded-2xl text-[10px] font-black tracking-widest uppercase hover:scale-[1.05] transition-all shadow-lg shadow-primary/10"
+              >
+                <Plus size={16} /> ADD EVENT
+              </button>
+            </div>
+
+            <div className="glass-effect rounded-[40px] overflow-hidden border-white/5">
+              <table className="w-full text-left">
+                <thead className="bg-white/5 border-b border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                  <tr>
+                    <th className="px-8 py-8">Title</th>
+                    <th className="px-6 py-8">Date</th>
+                    <th className="px-6 py-8">Price</th>
+                    <th className="px-6 py-8 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5 text-sm uppercase font-bold text-white">
+                  {loading ? (
+                    <tr><td colSpan="4" className="p-40 text-center"><Loader2 className="animate-spin text-primary mx-auto" size={48} /></td></tr>
+                  ) : events.length > 0 ? (
+                    events.map((event) => (
+                      <tr key={event._id} className="hover:bg-white/[0.02] transition-colors group">
+                        <td className="px-8 py-8">
+                          <p className="text-white">{event.title}</p>
+                          <p className="text-gray-500 text-[10px] lowercase font-medium tracking-normal mt-1">{event.type}</p>
+                        </td>
+                        <td className="px-6 py-8">
+                          {new Date(event.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </td>
+                        <td className="px-6 py-8 text-primary">₹ {event.price}</td>
+                        <td className="px-6 py-8 text-right">
+                          <div className="flex justify-end gap-3">
+                            <button 
+                              onClick={() => handleOpenEventModal(event)}
+                              disabled={actionLoading}
+                              className="p-3 bg-white/5 text-white rounded-xl hover:bg-primary hover:text-dark transition-all disabled:opacity-50"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteEvent(event._id)}
+                              disabled={actionLoading}
+                              className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 transition-all hover:text-white disabled:opacity-50"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="4" className="p-40 text-center">
+                        <div className="flex flex-col items-center gap-4 text-gray-600">
+                          <span className="text-4xl">🚀</span>
+                          <p className="font-black uppercase tracking-widest">No events found. Add your first event</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* TAB CONTENT: GALLERY MANAGER */}
         {activeTab === 'gallery' && (
           <div className="space-y-16 animate-fade-in">
@@ -545,6 +696,88 @@ const AdminDashboard = () => {
         )}
 
       </div>
+
+      {/* REUSABLE EVENT MODAL */}
+      {isEventModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 sm:p-12">
+          <div className="absolute inset-0 bg-dark/90 backdrop-blur-md" onClick={() => !actionLoading && setIsEventModalOpen(false)}></div>
+          
+          <div className="relative w-full max-w-2xl glass-effect p-8 sm:p-12 rounded-[50px] border-white/10 animate-fade-in overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+            
+            <h2 className="text-3xl font-black mb-8 uppercase tracking-tighter">
+              {editingEvent ? 'Edit' : 'Create'} <span className="text-primary text-4xl">Event.</span>
+            </h2>
+
+            <form onSubmit={handleEventSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-4">Event Title</label>
+                <input 
+                  required
+                  type="text" 
+                  placeholder="e.g. Midnight Cricket Cup"
+                  className="w-full bg-white/5 border border-white/10 p-5 rounded-3xl outline-none focus:border-primary/50 font-bold transition-all"
+                  value={eventFormData.title}
+                  onChange={(e) => setEventFormData({...eventFormData, title: e.target.value})}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-4">Event Date</label>
+                  <input 
+                    required
+                    type="date" 
+                    className="w-full bg-white/5 border border-white/10 p-5 rounded-3xl outline-none focus:border-primary/50 font-bold transition-all text-white"
+                    value={eventFormData.date}
+                    onChange={(e) => setEventFormData({...eventFormData, date: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-4">Price (INR)</label>
+                  <input 
+                    required
+                    type="number" 
+                    placeholder="e.g. 500"
+                    className="w-full bg-white/5 border border-white/10 p-5 rounded-3xl outline-none focus:border-primary/50 font-bold transition-all"
+                    value={eventFormData.price}
+                    onChange={(e) => setEventFormData({...eventFormData, price: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-4">Description</label>
+                <textarea 
+                  required
+                  rows={4}
+                  placeholder="Speak about the event..."
+                  className="w-full bg-white/5 border border-white/10 p-6 rounded-3xl outline-none focus:border-primary/50 font-bold transition-all text-white"
+                  value={eventFormData.description}
+                  onChange={(e) => setEventFormData({...eventFormData, description: e.target.value})}
+                />
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button"
+                  onClick={() => !actionLoading && setIsEventModalOpen(false)}
+                  className="flex-1 py-5 rounded-3xl text-[10px] font-black tracking-widest uppercase border border-white/10 hover:bg-white/5 transition-all"
+                >
+                  CANCEL
+                </button>
+                <button 
+                  type="submit"
+                  disabled={actionLoading}
+                  className="flex-[2] py-5 bg-primary text-dark rounded-3xl text-[10px] font-black tracking-widest uppercase hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center justify-center gap-3 shadow-lg shadow-primary/10"
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" size={16} /> : (editingEvent ? 'SAVE CHANGES' : 'CREATE EVENT')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
